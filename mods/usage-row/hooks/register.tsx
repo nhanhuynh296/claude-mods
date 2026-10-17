@@ -34,6 +34,17 @@ export function formatCountdown(ms: number): string {
   return `${two(minutes)}:${two(total % 60)}`
 }
 
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+
+// Whether a drawn reply block is the main thread's last reply. Surfaces name a
+// block by the API message id (`msg_…-t0`), not the transcript row, so the
+// text is what ties them: the last block of the reply ends the stored text.
+export function isLastReply(drawnText: string, last: LastReply | null): boolean {
+  if (!last) return false
+  const drawn = norm(drawnText)
+  return drawn.length > 0 && (drawn === last.text || last.text.endsWith(drawn))
+}
+
 function toWindow(limits: SessionRateLimit[], kind: string): Window | null {
   const found = limits.find(l => l.kind === kind)
   if (!found) return null
@@ -86,10 +97,9 @@ export const register: Register = on => {
       .filter(b => b.type === 'text' && typeof b.text === 'string')
       .map(b => b.text ?? '')
       .join('\n')
-      .trim()
-    if (text) {
+    if (norm(text)) {
       try {
-        const reply: LastReply = { id: stored.uuid ?? e.uuid, text }
+        const reply: LastReply = { id: stored.uuid ?? e.uuid, text: norm(text) }
         await update($, lastReply, () => reply)
       } catch {
         // The row is stored either way; a missed countdown is all that is lost.
@@ -126,28 +136,18 @@ export const register: Register = on => {
     )
   })
 
-  // The prompt-cache countdown, under the main thread's last reply.
+  // The prompt-cache countdown, as a last line of the main thread's last reply.
+  // It rewrites the block's text, so each surface draws the reply its own way.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const last = await read($, lastReply)
-    if (!last) return next(e)
-    const isLast = e.requestId === last.id || e.props.text.trim() === last.text
-    if (!isLast) return next(e)
+    if (!isLastReply(e.props.text, await read($, lastReply))) return next(e)
     const at = await read($, lastRequestAt)
     if (at === null) return next(e)
 
-    const drawn = await next(e)
-    const { Box, Text } = $.ui.resolve(e)
     const now = (await read($, clockNow)) || (await $.clock.now())
     const left = at + CACHE_TTL_MS - now
-    const isWarm = left > 0
-
-    return (
-      <Box flexDirection="column">
-        {drawn}
-        <Text mono tabular dimColor={!isWarm || left >= CACHE_WARN_MS} color={isWarm && left < CACHE_WARN_MS ? AMBER : undefined}>
-          {`◷ cache ${isWarm ? formatCountdown(left).padStart(5) : ' cold'}`}
-        </Text>
-      </Box>
-    )
+    const label = left > 0 ? formatCountdown(left).padStart(5) : ' cold'
+    const warn = left > 0 && left < CACHE_WARN_MS ? ' · expiring' : ''
+    const line = '`◷ cache ' + label + '`' + warn
+    return next({ ...e, props: { ...e.props, text: e.props.text + '\n\n' + line } })
   })
 }

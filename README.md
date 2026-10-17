@@ -10,7 +10,7 @@ One row above the prompt, right-aligned, in monospace with fixed-width numbers s
 
 `124k │ 5h 23% │ ↻ 2h14m`: context tokens, the 5-hour limit (amber from 75%, red from 90%), and time until it resets.
 
-Under the main thread's last reply it adds `◷ cache 38:12`, the prompt cache's countdown (amber under 5 minutes).
+As the last line of the main thread's last reply it adds `◷ cache 38:12`, the prompt cache's countdown (`· expiring` under 5 minutes).
 
 ## Install
 

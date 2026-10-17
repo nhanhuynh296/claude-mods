@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { formatCountdown, formatTokens } from '../hooks/register'
+import { formatCountdown, formatTokens, isLastReply } from '../hooks/register'
 
 test('countdown shows h/m from an hour, mm:ss below', async () => {
   expect(formatCountdown(2 * 3600_000 + 14 * 60_000)).toBe('2h14m')
@@ -34,4 +34,12 @@ test('the row shows tokens, the 5h limit and its reset on terminal and desktop',
     expect(await band.find({ type: 'Text', text: /wk|running|ctx/ })).toBeUndefined()
     await band.unmount()
   }
+})
+
+test('the last reply is found by its text, whatever its id or spacing', async () => {
+  const last = { id: 'row-uuid', text: 'First block. Second block ends here.' }
+  expect(isLastReply('Second  block\nends here.', last)).toBe(true)
+  expect(isLastReply('First block. Second block ends here.', last)).toBe(true)
+  expect(isLastReply('Something earlier.', last)).toBe(false)
+  expect(isLastReply('   ', last)).toBe(false)
 })
