@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderNode, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, Register, RenderNode, SessionRateLimit, Space } from 'claude-code'
 
 import type { AgentRun, AgentState, LastReply, Task, TaskStatus, Usage, View, Window } from '../types'
 
@@ -361,13 +361,20 @@ export const register: Register = on => {
     const row = (
       <Box key="row" flexDirection="row" justifyContent="space-between" columnGap={2}>
         {hasWork ? (
-          <Button key="toggle" plain onPress={pinned ? () => $.ui.open({ id: PANE, title: PANE_TITLE }) : toggle}>
-            {running.length > 0 ? '◐ ' : '○ '}
-            {`${running.length} running`}
-            <Text dimColor> · </Text>
-            <Text mono tabular>{`${done}/${taskList.length}`}</Text>
-            <Text dimColor>{` ${chevron}`}</Text>
-          </Button>
+          <Box flexDirection="row" alignItems="center" columnGap="md">
+            <Button key="toggle" plain onPress={pinned ? () => $.ui.open({ id: PANE, title: PANE_TITLE }) : toggle}>
+              {running.length > 0 ? '◐ ' : '○ '}
+              {`${running.length} running`}
+              <Text dimColor> · </Text>
+              <Text mono tabular>{`${done}/${taskList.length}`}</Text>
+              <Text dimColor>{` ${chevron}`}</Text>
+            </Button>
+            {!pinned && mode === 'expanded' && (
+              <Button key="pin" plain dimColor onPress={() => pin($)}>
+                <Text dimColor>Pin to side</Text>
+              </Button>
+            )}
+          </Box>
         ) : (
           <Text> </Text>
         )}
@@ -381,14 +388,14 @@ export const register: Register = on => {
 
     const windowRows = e.viewport?.rows ? Math.floor(e.viewport.rows * SHARE_OF_WINDOW) : e.props.maxRows
     const budget = Math.max(3, Math.min(e.props.maxRows, windowRows) - 1)
-    const els = { Box, Text, Button }
+    const els = { Box, Text, Button, sp: spacingFor(e.surface) }
     const body =
       mode === 'expanded'
         ? drawFull($, els, taskList, agentList, now, budget, true)
         : drawPeek($, els, taskList, running, now, budget)
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" rowGap={spacingFor(e.surface).row}>
         {below}
         {body}
         {row}
@@ -401,12 +408,12 @@ export const register: Register = on => {
     const taskList = await read($, tasks)
     const agentList = await read($, agents)
     const now = (await read($, clockNow)) || (await $.clock.now())
-    const els = { Box, Text, Button }
+    const els = { Box, Text, Button, sp: spacingFor(e.surface) }
     const running = agentList.filter(a => a.state === 'running').length
     const done = taskList.filter(t => t.status === 'completed').length
 
     return (
-      <Box flexDirection="column" rowGap={1}>
+      <Box flexDirection="column" rowGap="sm">
         <Box flexDirection="row" justifyContent="space-between">
           <Text mono tabular dimColor>
             {`${done}/${taskList.length} done`}
@@ -454,7 +461,16 @@ export const register: Register = on => {
 
 // The surface's own element constructors, as `$.ui.resolve(e)` handed them.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Draw = { Box: any; Text: any; Button: any }
+type Draw = { Box: any; Text: any; Button: any; sp: Spacing }
+
+// Desktop matches its own task list's rhythm; the terminal stays tight, as
+// every step there costs a whole row.
+type Spacing = { row: Space; col: Space; padX: Space; padY: Space }
+export function spacingFor(surface: string): Spacing {
+  return surface === 'terminal' || surface === 'vscode'
+    ? { row: 'xs', col: 'sm', padX: 'sm', padY: 'xs' }
+    : { row: 'md', col: 'md', padX: 'lg', padY: 'md' }
+}
 type Dollar = EngineInterface
 
 function stopAgent($: Dollar, id: string) {
@@ -463,31 +479,50 @@ function stopAgent($: Dollar, id: string) {
   }
 }
 
-function agentCard($: Dollar, { Box, Text, Button }: Draw, a: AgentRun, now: number, title: string | null): RenderNode {
-  const isRunning = a.state === 'running'
-  const elapsed = formatElapsed((a.endedAt ?? now) - a.startedAt)
-  const detail = isRunning ? a.lastAction ?? a.type : a.state === 'done' ? 'done' : 'stopped'
+// One line of the list: a glyph in a fixed gutter, so titles line up.
+function line({ Box, Text, sp }: Draw, key: string, glyph: string, title: RenderNode, opts: { dim?: boolean; strong?: boolean; tail?: string } = {}): RenderNode {
   return (
-    <Box key={`agent-${a.id}`} flexDirection="row" columnGap={1}>
-      <Text dimColor={!isRunning}>{isRunning ? '◐' : a.state === 'done' ? '✓' : '×'}</Text>
-      <Box flexDirection="column" flexGrow={1}>
+    <Box key={key} flexDirection="row" columnGap={sp.col}>
+      <Box width={2} flexShrink={0}><Text dimColor={opts.dim}>{glyph}</Text></Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text dimColor={opts.dim} weight={opts.strong ? 'medium' : undefined} wrap="truncate">{title}</Text>
+      </Box>
+      {opts.tail !== undefined && <Text dimColor mono tabular>{opts.tail}</Text>}
+    </Box>
+  )
+}
+
+function agentCard($: Dollar, els: Draw, a: AgentRun, now: number, title: string | null): RenderNode {
+  const { Box, Text, Button, sp } = els
+  const isRunning = a.state === 'running'
+  const elapsed = formatElapsed((a.endedAt ?? now) - a.startedAt).trim()
+  const detail = isRunning ? a.lastAction ?? a.type : a.state === 'done' ? 'done' : 'stopped'
+  const glyph = isRunning ? '◐' : a.state === 'done' ? '✓' : '×'
+  return (
+    <Box key={`agent-${a.id}`} flexDirection="row" columnGap={sp.col}>
+      <Box width={2} flexShrink={0}><Text dimColor={!isRunning}>{title !== null ? glyph : '⎿'}</Text></Box>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {title !== null && <Text weight="medium" wrap="truncate">{title}</Text>}
         <Text mono tabular dimColor wrap="truncate">
           {a.label}
           {' │ '}
           {detail}
-          {' │ '}
-          {elapsed}
         </Text>
       </Box>
+      <Text dimColor mono tabular>{elapsed}</Text>
       {isRunning && <Button key={`stop-${a.id}`} label="■" plain onPress={stopAgent($, a.id)} />}
     </Box>
   )
 }
 
+const frame = ({ Box, sp }: Draw, key: string, children: RenderNode[]) => (
+  <Box key={key} flexDirection="column" rowGap={sp.row} borderStyle="round" borderDimColor paddingX={sp.padX} paddingY={sp.padY}>
+    {children}
+  </Box>
+)
+
 // E: what is running now, and what is next.
 function drawPeek($: Dollar, els: Draw, taskList: Task[], running: AgentRun[], now: number, budget: number): RenderNode {
-  const { Box, Text } = els
   const rows: RenderNode[] = []
   let used = 0
   for (const a of running) {
@@ -499,91 +534,78 @@ function drawPeek($: Dollar, els: Draw, taskList: Task[], running: AgentRun[], n
   if (running.length === 0) {
     for (const t of taskList.filter(t => t.status === 'in_progress')) {
       if (used + 1 > budget - 1) break
-      rows.push(<Text key={`task-${t.id}`} wrap="truncate">{`◐ ${t.title}`}</Text>)
+      rows.push(line(els, `task-${t.id}`, '◐', t.title, { strong: true }))
       used += 1
     }
   }
   const hidden = running.length - rows.length
   const nextTask = taskList.find(t => t.status === 'pending')
-  if (hidden > 0) rows.push(<Text key="more" dimColor>{`+${hidden} more running`}</Text>)
+  if (hidden > 0) rows.push(line(els, 'more', '', `+${hidden} more running`, { dim: true }))
   else if (nextTask) {
-    const after = nextTask.blockedBy.length ? `  after ${nextTask.blockedBy.map(b => `#${b}`).join(', ')}` : ''
-    rows.push(<Text key="next" dimColor wrap="truncate">{`○ Next: ${nextTask.title}${after}`}</Text>)
+    const after = nextTask.blockedBy.length ? `after ${nextTask.blockedBy.map(b => `#${b}`).join(', ')}` : undefined
+    rows.push(line(els, 'next', '○', `Next: ${nextTask.title}`, { dim: true, tail: after }))
   }
-  return (
-    <Box key="peek" flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
-      {rows}
-    </Box>
-  )
+  return frame(els, 'peek', rows)
 }
 
 // F, and the pane: every task, the agents under the tasks they work.
+// The band folds finished tasks into one line; the pane lists each.
 function drawFull($: Dollar, els: Draw, taskList: Task[], agentList: AgentRun[], now: number, budget: number, isBand: boolean): RenderNode {
-  const { Box, Text, Button } = els
-  type Item = { rows: number; node: RenderNode; isDone: boolean }
+  const { Box, Text, sp } = els
+  type Item = { rows: number; node: RenderNode }
   const items: Item[] = []
   const linked = new Set<string>()
 
+  const doneTasks = taskList.filter(t => t.status === 'completed')
+  if (isBand && doneTasks.length > 0) {
+    const last = doneTasks[doneTasks.length - 1]
+    items.push({ rows: 1, node: line(els, 'done', '✓', `${doneTasks.length} done`, { dim: true, tail: last ? clip(last.title, 40) : undefined }) })
+  }
+
   for (const t of taskList) {
     if (t.status === 'completed') {
-      items.push({ rows: 1, isDone: true, node: <Text key={`task-${t.id}`} dimColor wrap="truncate">{`✓ ${t.title}`}</Text> })
+      if (!isBand) items.push({ rows: 1, node: line(els, `task-${t.id}`, '✓', t.title, { dim: true }) })
     } else if (t.status === 'in_progress') {
       const workers = agentsFor(t, agentList)
       workers.forEach(a => linked.add(a.id))
       items.push({
         rows: 1 + workers.length,
-        isDone: false,
         node: (
-          <Box key={`task-${t.id}`} flexDirection="column">
-            <Text weight="medium" wrap="truncate">{`◐ ${t.title}`}</Text>
+          <Box key={`task-${t.id}`} flexDirection="column" rowGap={sp.row}>
+            {line(els, `title-${t.id}`, '◐', t.title, { strong: true })}
             {workers.map(a => (
-              <Box key={`w-${a.id}`} paddingLeft={2}>{agentCard($, els, a, now, null)}</Box>
+              <Box key={`w-${a.id}`} paddingLeft={3}>{agentCard($, els, a, now, null)}</Box>
             ))}
           </Box>
         ),
       })
     } else {
-      const after = t.blockedBy.length ? `  after ${t.blockedBy.map(b => `#${b}`).join(', ')}` : ''
-      items.push({ rows: 1, isDone: false, node: <Text key={`task-${t.id}`} wrap="truncate">{`○ ${t.title}`}<Text dimColor>{after}</Text></Text> })
+      const after = t.blockedBy.length ? `after ${t.blockedBy.map(b => `#${b}`).join(', ')}` : undefined
+      items.push({ rows: 1, node: line(els, `task-${t.id}`, '○', t.title, { tail: after }) })
     }
   }
 
   const loose = agentList.filter(a => !linked.has(a.id) && (a.state === 'running' || now - (a.endedAt ?? now) < 10 * 60_000))
-  for (const a of loose) items.push({ rows: 2, isDone: a.state !== 'running', node: agentCard($, els, a, now, a.label) })
+  for (const a of loose) items.push({ rows: 2, node: agentCard($, els, a, now, a.label) })
 
   let shown = items
-  const total = (list: Item[]) => list.reduce((n, it) => n + it.rows, 0)
-  const room = budget - (isBand ? 1 : 0) // the actions row
-  if (total(shown) > room) {
-    const doneTasks = taskList.filter(t => t.status === 'completed')
-    const rest = items.filter(it => !it.isDone)
-    shown = doneTasks.length
-      ? [{ rows: 1, isDone: true, node: <Text key="done" dimColor wrap="truncate">{`✓ ${doneTasks.length} done  ${doneTasks.map(t => t.title).join(', ')}`}</Text> }, ...rest]
-      : rest
-  }
   let more = 0
-  if (total(shown) > room) {
+  if (shown.reduce((n, it) => n + it.rows, 0) > budget) {
     const kept: Item[] = []
     let used = 0
     for (const it of shown) {
-      if (used + it.rows > room - 1) { more += 1; continue }
+      if (used + it.rows > budget - 1) { more += 1; continue }
       kept.push(it)
       used += it.rows
     }
     shown = kept
   }
 
-  return (
-    <Box key="full" flexDirection="column" borderStyle={isBand ? 'round' : undefined} borderDimColor paddingX={isBand ? 1 : 0}>
-      {shown.map(it => it.node)}
-      {more > 0 && <Text key="more" dimColor>{`+${more} more · pin for the full list`}</Text>}
-      {isBand && (
-        <Box key="actions" flexDirection="row" columnGap={2}>
-          <Button key="pin" label="Pin to side" plain onPress={() => pin($)} />
-        </Box>
-      )}
-    </Box>
-  )
+  const children = [
+    ...shown.map(it => it.node),
+    ...(more > 0 ? [<Text key="more" dimColor>{`+${more} more · pin for the full list`}</Text>] : []),
+  ]
+  return isBand ? frame(els, 'full', children) : <Box key="full" flexDirection="column" rowGap={sp.row}>{children}</Box>
 }
 
 async function pin($: Dollar) {
