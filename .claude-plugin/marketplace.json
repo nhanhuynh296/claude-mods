@@ -3,9 +3,9 @@
   "owner": { "name": "nhanhuynh296" },
   "plugins": [
     {
-      "name": "orchestrator-band",
-      "source": "./mods/orchestrator-band",
-      "description": "Collapsible tasks-and-agents tracker above the prompt, pinnable to a side pane, with usage (tokens, 5h limit, reset) on its row and a prompt-cache countdown under the last reply"
+      "name": "usage-row",
+      "source": "./mods/usage-row",
+      "description": "One monospace row above the prompt: context tokens, 5-hour limit and its reset, plus a prompt-cache countdown under the last reply"
     }
   ]
 }

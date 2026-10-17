@@ -4,29 +4,26 @@ Personal Claude Code mods, published as a plugin marketplace.
 
 ## Mods
 
-### orchestrator-band
+### usage-row
 
-A tracker for orchestrated work. It sits on one row above the prompt and grows upward.
+One row above the prompt, right-aligned, in monospace with fixed-width numbers so nothing shifts as values count down:
 
-- **Row:** `◐ 2 running · 2/6 ⌃` on the left. On the right, `124k │ 5h 23% │ ↻ 2h14m` (context tokens, 5-hour limit, time to reset), in monospace with fixed-width numbers.
-- **Peek (default):** the running agents, each with its task, latest action, elapsed time and a stop button, then the next pending task.
-- **Expanded:** the full task list, with agents under the tasks they work on, capped at 40% of the window. **Pin to side** moves it into a side pane; `/tracker` toggles the pane.
-- **Cache countdown:** `◷ cache 38:12` under the main thread's last reply.
+`124k │ 5h 23% │ ↻ 2h14m`: context tokens, the 5-hour limit (amber from 75%, red from 90%), and time until it resets.
 
-Tasks come from the desktop app's task list, `TodoWrite`, and `TaskCreate`/`TaskUpdate`. Agents come from the subagents the session spawns.
+Under the main thread's last reply it adds `◷ cache 38:12`, the prompt cache's countdown (amber under 5 minutes).
 
 ## Install
 
 At the prompt of a terminal session:
 
 ```
-/plugin install orchestrator-band --marketplace nhanhuynh296/claude-mods
+/plugin install usage-row --marketplace nhanhuynh296/claude-mods
 ```
 
 From a shell:
 
 ```bash
-claude plugin install orchestrator-band --marketplace nhanhuynh296/claude-mods
+claude plugin install usage-row --marketplace nhanhuynh296/claude-mods
 ```
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `nhanhuynh296/claude-mods`, then Add plugin.
@@ -36,9 +33,11 @@ This repository is private. Installing needs read access on GitHub and a git cre
 ## Develop
 
 ```bash
-claude plugin validate mods/orchestrator-band
+claude plugin validate mods/usage-row
 ```
 
 ```bash
-claude plugin test mods/orchestrator-band
+claude plugin test mods/usage-row
 ```
+
+Bump `version` in the mod's `.claude-plugin/plugin.json` before pushing, then `claude plugin update usage-row@claude-mods` and `/reload-plugins`.

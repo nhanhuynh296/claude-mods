@@ -1,6 +1,0 @@
-{
-  "name": "orchestrator-band",
-  "version": "0.1.1",
-  "description": "Collapsible tasks-and-agents tracker above the prompt, pinnable to a side pane, sharing its row with usage (tokens, 5h limit, reset) and a cache countdown under the last reply",
-  "types": "./types/index.d.ts"
-}
