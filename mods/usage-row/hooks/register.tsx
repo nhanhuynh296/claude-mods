@@ -1,10 +1,14 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, SessionRateLimit } from 'claude-code'
+import type { AgentInfo, AgentStatus, Register, SessionRateLimit } from 'claude-code'
 
-import type { LastReply, Usage, Window } from '../types'
+import type { LastReply, Task, Usage, Window } from '../types'
 
 const CACHE_TTL_MS = 60 * 60 * 1000
 const CACHE_WARN_MS = 5 * 60 * 1000
+
+const TASK_LABEL_MAX = 24
+const TASK_TYPE_SUBAGENT = 'subagent'
+const LIVE_AGENT: readonly AgentStatus[] = ['pending', 'running', 'waiting']
 
 const AMBER = '#F2B35E'
 const RED = '#FF8A7A'
@@ -13,6 +17,36 @@ const usage = atom({ plugin: 'usage-row', key: 'usage' } as const, { tokens: nul
 const lastRequestAt = atom({ plugin: 'usage-row', key: 'lastRequestAt' } as const, null)
 const lastReply = atom({ plugin: 'usage-row', key: 'lastReply' } as const, null)
 const clockNow = atom({ plugin: 'usage-row', key: 'now' } as const, 0)
+const tasks = atom({ plugin: 'usage-row', key: 'tasks' } as const, [])
+const agents = atom({ plugin: 'usage-row', key: 'agents' } as const, [])
+
+type TaskSummary = { id: string; type: string; status: string; description: string; command?: string; name?: string }
+
+const clip = (s: string) => (s.length > TASK_LABEL_MAX ? `${s.slice(0, TASK_LABEL_MAX - 1)}…` : s)
+
+// The Stop snapshot of background work. Subagents come live from
+// `$.agent.list()` instead, so they are left out here.
+export function toTasks(summaries: readonly TaskSummary[] | undefined): Task[] {
+  return (summaries ?? [])
+    .filter(t => t.type !== TASK_TYPE_SUBAGENT)
+    .map(t => ({ id: t.id, type: t.type, label: clip(t.name || t.description || t.command || t.type) }))
+}
+
+export function toAgentTasks(list: readonly AgentInfo[]): Task[] {
+  return list
+    .filter(a => LIVE_AGENT.includes(a.status))
+    .map(a => ({ id: a.id, type: TASK_TYPE_SUBAGENT, label: clip(a.description || a.type) }))
+}
+
+// The first task by name, the rest as a count, so the row stays one line.
+export function tasksLabel(list: readonly Task[]): string {
+  const [first, ...rest] = list
+  if (!first) return ''
+  return rest.length > 0 ? `${first.label} +${rest.length}` : first.label
+}
+
+const sameTasks = (a: readonly Task[], b: readonly Task[]) =>
+  a.length === b.length && a.every((t, i) => t.id === b[i]?.id && t.label === b[i]?.label)
 
 export function formatTokens(n: number | null): string {
   if (n === null) return '--'
@@ -70,9 +104,17 @@ export const register: Register = on => {
     $.clock.every(1000, async () => {
       const at = await $.clock.now()
       await update($, clockNow, () => at)
+      const live = toAgentTasks(await $.agent.list())
+      await update($, agents, prev => (sameTasks(prev, live) ? prev : live))
     })
     return next(e)
   })
+
+  // Each turn end lists the background work still in flight.
+  on('classic.Stop', async ($, e, next) => {
+    await update($, tasks, () => toTasks(e.background_tasks))
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
     await update($, usage, () => toUsage(e.context.tokens, e.rateLimits))
@@ -116,12 +158,13 @@ export const register: Register = on => {
     const u = await read($, usage)
     const now = (await read($, clockNow)) || (await $.clock.now())
     const resetMs = u.fiveHour?.resetsAt != null ? u.fiveHour.resetsAt - now : null
+    const running = [...(await read($, tasks)), ...(await read($, agents))]
     const sep = <Text dimColor>{' │ '}</Text>
 
     return (
       <Box flexDirection="column">
         {below}
-        <Box flexDirection="row" justifyContent="flex-end">
+        <Box flexDirection="row" justifyContent="space-between">
           <Text mono tabular wrap="truncate">
             <Text>{formatTokens(u.tokens).padStart(5)}</Text>
             {sep}
@@ -131,6 +174,12 @@ export const register: Register = on => {
             <Text dimColor>↻ </Text>
             <Text>{(resetMs === null ? '--' : formatCountdown(resetMs)).padStart(5)}</Text>
           </Text>
+          {running.length > 0 && (
+            <Text wrap="truncate">
+              <Text color={AMBER}>{`◉ ${running.length} `}</Text>
+              <Text dimColor>{tasksLabel(running)}</Text>
+            </Text>
+          )}
         </Box>
       </Box>
     )

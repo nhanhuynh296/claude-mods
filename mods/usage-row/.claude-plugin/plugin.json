@@ -1,6 +1,6 @@
 {
   "name": "usage-row",
-  "version": "0.2.1",
-  "description": "One monospace row above the prompt: context tokens, 5-hour limit and its reset, plus a prompt-cache countdown under the last reply",
+  "version": "0.3.0",
+  "description": "One monospace row above the prompt: context tokens, 5-hour limit and its reset, running background tasks on the right, plus a prompt-cache countdown under the last reply",
   "types": "./types/index.d.ts"
 }

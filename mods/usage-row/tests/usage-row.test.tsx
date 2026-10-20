@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { formatCountdown, formatTokens, isLastReply } from '../hooks/register'
+import { formatCountdown, formatTokens, isLastReply, tasksLabel, toAgentTasks, toTasks } from '../hooks/register'
 
 test('countdown shows h/m from an hour, mm:ss below', async () => {
   expect(formatCountdown(2 * 3600_000 + 14 * 60_000)).toBe('2h14m')
@@ -32,6 +32,7 @@ test('the row shows tokens, the 5h limit and its reset on terminal and desktop',
       expect(await band.find({ type: 'Text', text: label })).toBeDefined()
     }
     expect(await band.find({ type: 'Text', text: /wk|running|ctx/ })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /◉/ })).toBeUndefined()
     await band.unmount()
   }
 })
@@ -42,4 +43,50 @@ test('the last reply is found by its text, whatever its id or spacing', async ()
   expect(isLastReply('First block. Second block ends here.', last)).toBe(true)
   expect(isLastReply('Something earlier.', last)).toBe(false)
   expect(isLastReply('   ', last)).toBe(false)
+})
+
+test('the Stop snapshot keeps shells and monitors and leaves subagents to the live list', async () => {
+  const got = toTasks([
+    { id: 'b1', type: 'shell', status: 'running', description: '', command: 'npm run dev' },
+    { id: 'a1', type: 'subagent', status: 'running', description: 'Explore repo' },
+    { id: 'm1', type: 'monitor', status: 'running', description: 'Watch the deploy log for errors' },
+  ])
+  expect(got).toEqual([
+    { id: 'b1', type: 'shell', label: 'npm run dev' },
+    { id: 'm1', type: 'monitor', label: 'Watch the deploy log fo…' },
+  ])
+  expect(toTasks(undefined)).toEqual([])
+})
+
+test('live agents count while pending, running or waiting', async () => {
+  const agent = (id: string, status: string) => ({ id, status, description: `job ${id}`, type: 'Explore' }) as never
+  expect(toAgentTasks([agent('1', 'running'), agent('2', 'completed'), agent('3', 'waiting')]).map(t => t.id)).toEqual(['1', '3'])
+})
+
+test('background tasks show on the right of the row', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  on('classic.Stop', () => ({}))
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'dev server' }] } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const band = await $.ui.mount({
+      plugin: 'usage-row',
+      surface,
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 80, scroll: { top: 0, bodyRows: 19 }, view: {} },
+    } as never)
+    expect(await band.find({ type: 'Text', text: /◉ 1/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /dev server/ })).toBeDefined()
+    await band.unmount()
+  }
+})
+
+test('three tasks show the first by name and the rest as a count', async () => {
+  const t = (id: string, label: string) => ({ id, type: 'shell', label })
+  expect(tasksLabel([t('1', 'npm run dev'), t('2', 'tail log'), t('3', 'Explore repo')])).toBe('npm run dev +2')
+  expect(tasksLabel([t('1', 'npm run dev')])).toBe('npm run dev')
+  expect(tasksLabel([])).toBe('')
 })

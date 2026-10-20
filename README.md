@@ -6,9 +6,11 @@ Personal Claude Code mods, published as a plugin marketplace.
 
 ### usage-row
 
-One row above the prompt, right-aligned, in monospace with fixed-width numbers so nothing shifts as values count down:
+One row above the prompt, in monospace with fixed-width numbers so nothing shifts as values count down.
 
-`124k │ 5h 23% │ ↻ 2h14m`: context tokens, the 5-hour limit (amber from 75%, red from 90%), and time until it resets.
+Left: `124k │ 5h 23% │ ↻ 2h14m`: context tokens, the 5-hour limit (amber from 75%, red from 90%), and time until it resets.
+
+Right, while background work runs: `◉ 3 npm run dev +2`: the count, the first task's name, and how many more. Shells, monitors and workflows update at each turn end; subagents update every second.
 
 As the last line of the main thread's last reply it adds `◷ cache 38:12`, the prompt cache's countdown (`· expiring` under 5 minutes).
 
