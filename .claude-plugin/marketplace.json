@@ -5,7 +5,7 @@
     {
       "name": "usage-row",
       "source": "./mods/usage-row",
-      "description": "One monospace row above the prompt: context tokens, 5-hour limit and its reset, running background tasks on the right, plus a prompt-cache countdown under the last reply"
+      "description": "One monospace row above the prompt: a context ring with tokens of the window, 5-hour limit and its reset, running background tasks on the right, plus a prompt-cache countdown under the last reply"
     }
   ]
 }

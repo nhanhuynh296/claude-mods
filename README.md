@@ -8,7 +8,7 @@ Personal Claude Code mods, published as a plugin marketplace.
 
 One row above the prompt, in monospace with fixed-width numbers so nothing shifts as values count down.
 
-Left: `124k │ 5h 23% │ ↻ 2h14m`: context tokens, the 5-hour limit (amber from 75%, red from 90%), and time until it resets.
+Left: `◔ 23% 228k/1M │ 5h 5% │ ↻ 3h36m`: a ring and percent for the chat's context window (an SVG ring on desktop, `○◔◑◕●` on the terminal), its tokens of the window, the 5-hour limit, and time until it resets. Levels are green, amber from 75%, red from 90%. Text uses the app's theme colors, so contrast holds in light and dark.
 
 Right, while background work runs: `◉ 3 npm run dev +2`: the count, the first task's name, and how many more. Shells, monitors and workflows update at each turn end; subagents update every second.
 

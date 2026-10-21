@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentInfo, AgentStatus, Register, SessionRateLimit } from 'claude-code'
+import type { AgentInfo, AgentStatus, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
 import type { LastReply, Task, Usage, Window } from '../types'
 
@@ -10,10 +10,21 @@ const TASK_LABEL_MAX = 24
 const TASK_TYPE_SUBAGENT = 'subagent'
 const LIVE_AGENT: readonly AgentStatus[] = ['pending', 'running', 'waiting']
 
-const AMBER = '#F2B35E'
-const RED = '#FF8A7A'
+// Theme keys: the surface picks each one's light or dark shade, so text
+// keeps its contrast on either background.
+type Level = 'success' | 'warning' | 'error'
+const LIMIT_LABEL = 'permission'
+const RESET = 'suggestion'
+const TASKS = 'warning'
 
-const usage = atom({ plugin: 'usage-row', key: 'usage' } as const, { tokens: null, fiveHour: null })
+// An SVG reads no theme: mid shades that hold on light and dark alike.
+const RING_HEX: Record<Level, string> = { success: '#1F9D55', warning: '#D97706', error: '#DC2626' }
+const RING_TRACK = '#80808066'
+
+const RING_PX = 14
+const RING_GLYPHS = ['○', '◔', '◑', '◕', '●'] as const
+
+const usage = atom({ plugin: 'usage-row', key: 'usage' } as const, { tokens: null, window: null, contextPercent: null, fiveHour: null })
 const lastRequestAt = atom({ plugin: 'usage-row', key: 'lastRequestAt' } as const, null)
 const lastReply = atom({ plugin: 'usage-row', key: 'lastReply' } as const, null)
 const clockNow = atom({ plugin: 'usage-row', key: 'now' } as const, 0)
@@ -53,7 +64,7 @@ export function formatTokens(n: number | null): string {
   if (n < 1000) return String(n)
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`
-  return `${(n / 1_000_000).toFixed(2)}M`
+  return `${parseFloat((n / 1_000_000).toFixed(2))}M`
 }
 
 const two = (n: number) => String(n).padStart(2, '0')
@@ -86,21 +97,46 @@ function toWindow(limits: SessionRateLimit[], kind: string): Window | null {
   return { percent: found.percentUsed, resetsAt: Number.isNaN(resetsAt) ? null : resetsAt }
 }
 
-function toUsage(tokens: number | undefined, limits: SessionRateLimit[]): Usage {
-  return { tokens: tokens ?? null, fiveHour: toWindow(limits, 'five_hour') }
+function toUsage(context: SessionContextUsage, limits: SessionRateLimit[]): Usage {
+  return {
+    tokens: context.tokens ?? null,
+    window: context.window,
+    contextPercent: context.percent ?? null,
+    fiveHour: toWindow(limits, 'five_hour'),
+  }
 }
 
-function limitColor(w: Window | null): string | undefined {
-  if (!w) return undefined
-  if (w.percent >= 90) return RED
-  if (w.percent >= 75) return AMBER
-  return undefined
+// Green while there is room, amber from 75%, red from 90%.
+export function levelColor(percent: number | null): Level | undefined {
+  if (percent === null) return undefined
+  if (percent >= 90) return 'error'
+  if (percent >= 75) return 'warning'
+  return 'success'
+}
+
+// A quarter-step ring glyph for the terminal, which draws no SVG.
+export function ringGlyph(percent: number | null): string {
+  if (percent === null) return RING_GLYPHS[0]
+  const step = Math.min(RING_GLYPHS.length - 1, Math.round((percent / 100) * (RING_GLYPHS.length - 1)))
+  return RING_GLYPHS[step] ?? RING_GLYPHS[0]
+}
+
+// The ring as SVG: a dim track and an arc from 12 o'clock, clockwise. The
+// arc's pathLength of 100 makes its dash the percent itself; at 0 it is left
+// out, as its round cap would still draw a dot.
+export function ringSvg(percent: number | null, color: string): string {
+  const filled = Math.round(Math.max(0, Math.min(100, percent ?? 0)))
+  const ring = 'cx="8" cy="8" r="6"'
+  const arc = filled > 0
+    ? `<circle ${ring} stroke="${color}" stroke-linecap="round" pathLength="100" stroke-dasharray="${filled} 100" transform="rotate(-90 8 8)"/>`
+    : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke-width="2.5"><circle ${ring} stroke="${RING_TRACK}"/>${arc}</svg>`
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const now = await $.session.usage()
-    await update($, usage, () => toUsage(now.context.tokens, now.rateLimits))
+    await update($, usage, () => toUsage(now.context, now.rateLimits))
     $.clock.every(1000, async () => {
       const at = await $.clock.now()
       await update($, clockNow, () => at)
@@ -117,7 +153,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
-    await update($, usage, () => toUsage(e.context.tokens, e.rateLimits))
+    await update($, usage, () => toUsage(e.context, e.rateLimits))
     return next(e)
   })
 
@@ -154,30 +190,45 @@ export const register: Register = on => {
     const below = await next(e)
     if (e.props.hasSurvey) return below
 
-    const { Box, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Text } = elements
+    // The terminal's table names Svg too but draws it as an empty box.
+    const Svg = e.surface !== 'terminal' && 'Svg' in elements ? elements.Svg : undefined
     const u = await read($, usage)
     const now = (await read($, clockNow)) || (await $.clock.now())
     const resetMs = u.fiveHour?.resetsAt != null ? u.fiveHour.resetsAt - now : null
     const running = [...(await read($, tasks)), ...(await read($, agents))]
     const sep = <Text dimColor>{' │ '}</Text>
+    // State kept from before 0.4.0 has no window or percent.
+    const ctxPercent = u.contextPercent ?? null
+    const ctxColor = levelColor(ctxPercent) ?? 'success'
+    const ctxLabel = ctxPercent === null ? '--' : `${ctxPercent}%`
 
     return (
       <Box flexDirection="column">
         {below}
         <Box flexDirection="row" justifyContent="space-between">
-          <Text mono tabular wrap="truncate">
-            <Text>{formatTokens(u.tokens).padStart(5)}</Text>
-            {sep}
-            <Text dimColor>5h </Text>
-            <Text color={limitColor(u.fiveHour)}>{(u.fiveHour ? `${Math.round(u.fiveHour.percent)}%` : '--').padStart(4)}</Text>
-            {sep}
-            <Text dimColor>↻ </Text>
-            <Text>{(resetMs === null ? '--' : formatCountdown(resetMs)).padStart(5)}</Text>
-          </Text>
+          <Box flexDirection="row" gap={1}>
+            {Svg ? (
+              <Svg source={ringSvg(ctxPercent, RING_HEX[ctxColor])} alt={`Context ${ctxLabel} used`} width={RING_PX} height={RING_PX} />
+            ) : (
+              <Text color={ctxColor}>{ringGlyph(ctxPercent)}</Text>
+            )}
+            <Text mono tabular wrap="truncate">
+              <Text color={ctxColor} bold>{ctxLabel.padStart(4)}</Text>
+              <Text>{` ${formatTokens(u.tokens)}/${formatTokens(u.window ?? null)}`}</Text>
+              {sep}
+              <Text color={LIMIT_LABEL} bold>5h </Text>
+              <Text color={levelColor(u.fiveHour?.percent ?? null)}>{(u.fiveHour ? `${Math.round(u.fiveHour.percent)}%` : '--').padStart(4)}</Text>
+              {sep}
+              <Text color={RESET} bold>↻ </Text>
+              <Text color={RESET}>{(resetMs === null ? '--' : formatCountdown(resetMs)).padStart(5)}</Text>
+            </Text>
+          </Box>
           {running.length > 0 && (
             <Text wrap="truncate">
-              <Text color={AMBER}>{`◉ ${running.length} `}</Text>
-              <Text dimColor>{tasksLabel(running)}</Text>
+              <Text color={TASKS} bold>{`◉ ${running.length} `}</Text>
+              <Text>{tasksLabel(running)}</Text>
             </Text>
           )}
         </Box>
