@@ -12,7 +12,7 @@ Left: `◔ 23% 228k/1M │ 5h 5% │ ↻ 3h36m`: a ring and percent for the chat
 
 Right, while background work runs: `◉ 3 npm run dev +2`: the count, the first task's name, and how many more. Shells, monitors and workflows show when they start and leave when their notification says they ended; subagents update every second.
 
-As the last line of the main thread's last reply it adds `◷ cache 38:12`, the prompt cache's countdown (`· expiring` under 5 minutes).
+Under the main thread's last reply it adds a monospace line, `󰚭 cache 38:12`: the prompt cache's countdown (`· expiring` under 5 minutes, `cold` once expired). The glyph is Nerd Font `md-timer_sand_empty`; a font without Nerd Font symbols draws it as a box. It follows a rewind to the reply that is then last.
 
 ## Install
 

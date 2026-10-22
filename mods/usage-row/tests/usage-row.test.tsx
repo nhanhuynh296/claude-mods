@@ -55,6 +55,29 @@ test('the last reply is the newest assistant row with text', async () => {
   expect(lastReplyOf([row('user', 'Fix it')])).toBeNull()
 })
 
+test('the last reply ends with a monospace cache countdown, not a code span', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.text}</Text>
+  })
+  const turn = { turnId: 't1', index: 0 }
+  on('turn.step', async function* () {
+    return { ...turn, answer: 'All done.', toolUses: [], stopReason: 'end_turn', usage: null }
+  } as never)
+  for await (const _ of $.turn.step({ ...turn, model: 'claude-opus-5-5', messageCount: 1 }));
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'All done.' }] }, door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1' } as never)
+  await clock.advance(60_000)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const reply = await $.ui.mount({ plugin: 'usage-row', surface, component: 'AssistantMessage', props: { text: 'All done.', isFirstOfReply: true } } as never)
+    const line = await reply.find({ type: 'Text', text: /^\u{F06AD} cache 59:00$/u })
+    expect(line?.props).toMatchObject({ mono: true })
+    expect(line?.props).not.toHaveProperty('dimColor')
+    expect(await reply.find({ type: 'Text', text: /`/ })).toBeUndefined()
+    await reply.unmount()
+  }
+})
+
 test('a rewind moves the cache countdown to the reply that is now last', async ($, on) => {
   const clock = mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
   let rows = [row('user', 'first'), row('assistant', 'First answer.'), row('user', 'second'), row('assistant', 'Second answer.')]
