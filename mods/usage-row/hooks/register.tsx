@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentInfo, AgentStatus, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
+import type { AgentInfo, AgentStatus, Register, SessionContextUsage, SessionMessage, SessionRateLimit } from 'claude-code'
 
 import type { LastReply, Task, Usage, Window } from '../types'
 
@@ -103,6 +103,14 @@ export function isLastReply(drawnText: string, last: LastReply | null): boolean 
   return drawn.length > 0 && (drawn === last.text || last.text.endsWith(drawn))
 }
 
+// The main thread's last reply as the conversation holds it now. A rewind cuts
+// rows with no session.append, and a resumed session starts with no state.
+export function lastReplyOf(rows: readonly SessionMessage[]): LastReply | null {
+  const i = rows.findLastIndex(r => r.role === 'assistant' && norm(r.text) !== '')
+  const row = rows[i]
+  return row ? { id: row.handle ?? String(i), text: norm(row.text) } : null
+}
+
 function toWindow(limits: SessionRateLimit[], kind: string): Window | null {
   const found = limits.find(l => l.kind === kind)
   if (!found) return null
@@ -147,14 +155,27 @@ export function ringSvg(percent: number | null, color: string): string {
 }
 
 export const register: Register = on => {
+  // The prompt count last seen; a drop means a rewind cut the conversation.
+  let turnsSeen: number | null = null
+
   on('session.start', async ($, e, next) => {
     const now = await $.session.usage()
     await update($, usage, () => toUsage(now.context, now.rateLimits))
+    if (!(await read($, lastReply))) {
+      const reply = lastReplyOf(await $.session.messages())
+      await update($, lastReply, () => reply)
+    }
     $.clock.every(1000, async () => {
       const at = await $.clock.now()
       await update($, clockNow, () => at)
       const live = toAgentTasks(await $.agent.list())
       await update($, agents, prev => (sameTasks(prev, live) ? prev : live))
+      const turns = await $.session.turns()
+      if (turnsSeen !== null && turns < turnsSeen) {
+        const reply = lastReplyOf(await $.session.messages())
+        await update($, lastReply, () => reply)
+      }
+      turnsSeen = turns
     })
     return next(e)
   })

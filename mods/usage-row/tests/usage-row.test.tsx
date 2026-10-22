@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { endedTaskIds, formatCountdown, formatTokens, isLastReply, levelColor, ringGlyph, ringSvg, tasksLabel, toAgentTasks, withTask } from '../hooks/register'
+import { endedTaskIds, formatCountdown, formatTokens, isLastReply, lastReplyOf, levelColor, ringGlyph, ringSvg, tasksLabel, toAgentTasks, withTask } from '../hooks/register'
 
 test('countdown shows h/m from an hour, mm:ss below', async () => {
   expect(formatCountdown(2 * 3600_000 + 14 * 60_000)).toBe('2h14m')
@@ -45,6 +45,36 @@ test('the last reply is found by its text, whatever its id or spacing', async ()
   expect(isLastReply('First block. Second block ends here.', last)).toBe(true)
   expect(isLastReply('Something earlier.', last)).toBe(false)
   expect(isLastReply('   ', last)).toBe(false)
+})
+
+const row = (role: 'user' | 'assistant', text: string, handle?: string) => ({ role, text, toolUses: [], handle })
+
+test('the last reply is the newest assistant row with text', async () => {
+  const rows = [row('user', 'Fix it'), row('assistant', 'Done.  Tests\npass.', 'h1'), row('assistant', ' '), row('user', 'Thanks')]
+  expect(lastReplyOf(rows)).toEqual({ id: 'h1', text: 'Done. Tests pass.' })
+  expect(lastReplyOf([row('user', 'Fix it')])).toBeNull()
+})
+
+test('a rewind moves the cache countdown to the reply that is now last', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
+  let rows = [row('user', 'first'), row('assistant', 'First answer.'), row('user', 'second'), row('assistant', 'Second answer.')]
+  on('session.turns', () => ({ value: rows.filter(r => r.role === 'user').length }) as never)
+  on('session.messages', () => ({ value: rows }) as never)
+  on('session.usage', () => ({ value: { context: { tokens: 1000, window: 1_000_000, percent: 0 }, rateLimits: [] } }) as never)
+  on('agent.list', () => ({ value: [] }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  const written: unknown[] = []
+  on('state.set', { plugin: 'usage-row', key: 'lastReply' }, ($, e, next) => {
+    written.push(e.value)
+    return next(e)
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(written.at(-1)).toEqual({ id: '3', text: 'Second answer.' })
+
+  await clock.advance(1000)
+  rows = rows.slice(0, 2)
+  await clock.advance(1000)
+  expect(written.at(-1)).toEqual({ id: '1', text: 'First answer.' })
 })
 
 const notification = (id: string, status: string) =>
