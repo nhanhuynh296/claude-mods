@@ -5,8 +5,6 @@ import type { LastReply, Task, Usage, Window } from '../types'
 
 const CACHE_TTL_MS = 60 * 60 * 1000
 const CACHE_WARN_MS = 5 * 60 * 1000
-// nf-md-timer_sand_empty: a Nerd Font glyph; a font without it draws a box.
-const CACHE_GLYPH = '\u{F06AD}'
 
 const TASK_LABEL_MAX = 24
 const TASK_TYPE_SUBAGENT = 'subagent'
@@ -341,8 +339,9 @@ export const register: Register = on => {
     )
   })
 
-  // The prompt-cache countdown, as a monospace line under the main thread's
-  // last reply. The surface draws the reply its own way above it.
+  // The prompt-cache countdown, as a dim monospace line under the main
+  // thread's last reply, the weight of a tool call's row. The surface draws
+  // the reply its own way above it.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!isLastReply(e.props.text, await read($, lastReply))) return next(e)
     const at = await read($, lastRequestAt)
@@ -357,7 +356,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         {reply}
-        <Text mono tabular>{`${CACHE_GLYPH} cache ${label}${warn}`}</Text>
+        <Text mono tabular dimColor>{`cache ${label}${warn}`}</Text>
       </Box>
     )
   })

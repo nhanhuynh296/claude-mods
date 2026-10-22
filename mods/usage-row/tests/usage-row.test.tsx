@@ -56,7 +56,7 @@ test('the last reply is the newest assistant row with text', async () => {
   expect(lastReplyOf([row('user', 'Fix it')])).toBeNull()
 })
 
-test('the last reply ends with a monospace cache countdown, not a code span', async ($, on) => {
+test('the last reply ends with a dim monospace cache countdown, not a code span', async ($, on) => {
   const clock = mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -71,9 +71,8 @@ test('the last reply ends with a monospace cache countdown, not a code span', as
   await clock.advance(60_000)
   for (const surface of ['terminal', 'desktop'] as const) {
     const reply = await $.ui.mount({ plugin: 'usage-row', surface, component: 'AssistantMessage', props: { text: 'All done.', isFirstOfReply: true } } as never)
-    const line = await reply.find({ type: 'Text', text: /^\u{F06AD} cache 59:00$/u })
-    expect(line?.props).toMatchObject({ mono: true })
-    expect(line?.props).not.toHaveProperty('dimColor')
+    const line = await reply.find({ type: 'Text', text: /^cache 59:00$/ })
+    expect(line?.props).toMatchObject({ mono: true, dimColor: true })
     expect(await reply.find({ type: 'Text', text: /`/ })).toBeUndefined()
     await reply.unmount()
   }

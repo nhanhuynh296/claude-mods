@@ -14,7 +14,7 @@ Right, while background work runs: `◉ 3 npm run dev +2`: the count, the first 
 
 When a tip shows above it (Claude Code's built-in tips), the tip and the row draw as two bordered cards; with no tip the row takes no border rows.
 
-Under the main thread's last reply it adds a monospace line, `󰚭 cache 38:12`: the prompt cache's countdown (`· expiring` under 5 minutes, `cold` once expired). The glyph is Nerd Font `md-timer_sand_empty`; a font without Nerd Font symbols draws it as a box. It follows a rewind to the reply that is then last.
+Under the main thread's last reply it adds a dim monospace line, `cache 38:12`: the prompt cache's countdown (`· expiring` under 5 minutes, `cold` once expired). It follows a rewind to the reply that is then last.
 
 ## Install
 
