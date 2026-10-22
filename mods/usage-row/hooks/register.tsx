@@ -31,16 +31,22 @@ const clockNow = atom({ plugin: 'usage-row', key: 'now' } as const, 0)
 const tasks = atom({ plugin: 'usage-row', key: 'tasks' } as const, [])
 const agents = atom({ plugin: 'usage-row', key: 'agents' } as const, [])
 
-type TaskSummary = { id: string; type: string; status: string; description: string; command?: string; name?: string }
+// A notification's status once its task is over; others (a monitor's event) keep it.
+const TASK_ENDED: readonly string[] = ['completed', 'failed', 'killed', 'stopped']
+const NOTIFIED_TASK = /<task-id>([^<]+)<\/task-id>[\s\S]*?<status>([^<]+)<\/status>/g
 
 const clip = (s: string) => (s.length > TASK_LABEL_MAX ? `${s.slice(0, TASK_LABEL_MAX - 1)}…` : s)
 
-// The Stop snapshot of background work. Subagents come live from
-// `$.agent.list()` instead, so they are left out here.
-export function toTasks(summaries: readonly TaskSummary[] | undefined): Task[] {
-  return (summaries ?? [])
-    .filter(t => t.type !== TASK_TYPE_SUBAGENT)
-    .map(t => ({ id: t.id, type: t.type, label: clip(t.name || t.description || t.command || t.type) }))
+// The ids of the tasks a task-notification text reports as over.
+export function endedTaskIds(text: string): string[] {
+  return [...text.matchAll(NOTIFIED_TASK)]
+    .filter(([, , status]) => TASK_ENDED.includes(status?.trim() ?? ''))
+    .map(([, id]) => id?.trim() ?? '')
+    .filter(Boolean)
+}
+
+export function withTask(list: readonly Task[], task: Task): Task[] {
+  return [...list.filter(t => t.id !== task.id), task]
 }
 
 export function toAgentTasks(list: readonly AgentInfo[]): Task[] {
@@ -80,6 +86,13 @@ export function formatCountdown(ms: number): string {
 }
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+
+const textOf = (content: readonly unknown[]) =>
+  content
+    .map(b => b as { type: string; text?: string })
+    .filter(b => b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text ?? '')
+    .join('\n')
 
 // Whether a drawn reply block is the main thread's last reply. Surfaces name a
 // block by the API message id (`msg_…-t0`), not the transcript row, so the
@@ -146,11 +159,47 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Each turn end lists the background work still in flight.
-  on('classic.Stop', async ($, e, next) => {
-    await update($, tasks, () => toTasks(e.background_tasks))
+  // Background work, from the result of the call that starts it. Not from
+  // classic.Stop: the built-in guard (sec-default) skips every installed mod's
+  // classic.* hooks. Subagents come live from `$.agent.list()` instead. A hook
+  // that fails after `next` is skipped and the call's result stands.
+  on('tool.call', async ($, e, next) => {
+    if (e.tool === 'Bash') {
+      const ran = await next(e)
+      const id = ran.deny === undefined && !ran.isError ? ran.result.backgroundTaskId : undefined
+      if (id) {
+        const task = { id, type: 'shell', label: clip(e.description || e.command) }
+        await update($, tasks, prev => withTask(prev, task))
+      }
+      return ran
+    }
+    if (e.tool === 'Monitor') {
+      const ran = await next(e)
+      if (ran.deny === undefined && !ran.isError) {
+        const task = { id: ran.result.taskId, type: 'monitor', label: clip(e.description) }
+        await update($, tasks, prev => withTask(prev, task))
+      }
+      return ran
+    }
+    if (e.tool === 'Workflow') {
+      const ran = await next(e)
+      if (ran.deny === undefined && !ran.isError && ran.result.taskId) {
+        const label = ran.result.workflowName || e.title || e.name || e.description || 'workflow'
+        const task = { id: ran.result.taskId, type: 'workflow', label: clip(label) }
+        await update($, tasks, prev => withTask(prev, task))
+      }
+      return ran
+    }
+    if (e.tool === 'TaskStop') {
+      const ran = await next(e)
+      if (ran.deny === undefined && !ran.isError) {
+        const id = ran.result.task_id
+        await update($, tasks, prev => prev.filter(t => t.id !== id))
+      }
+      return ran
+    }
     return next(e)
-  }).catch(($, e, next) => next(e))
+  })
 
   on('session.measure', async ($, e, next) => {
     await update($, usage, () => toUsage(e.context, e.rateLimits))
@@ -166,15 +215,16 @@ export const register: Register = on => {
     return yield* next(e)
   })
 
-  // The last reply of the main thread: where the cache countdown is drawn.
+  // A task's notification row says it is over: any door, as one queued,
+  // delivered or injected mid-turn comes by a different one; never a reply,
+  // which may quote one. The last reply of
+  // the main thread is where the cache countdown is drawn.
   on('session.append', async ($, e, next) => {
     const stored = await next(e)
+    const text = textOf(e.message.content)
+    const ended = e.message.type === 'assistant' ? [] : endedTaskIds(text)
+    if (ended.length > 0) await update($, tasks, prev => prev.filter(t => !ended.includes(t.id)))
     if (e.door !== 'response' || e.agentId || e.message.role !== 'assistant') return stored
-    const text = e.message.content
-      .map(b => b as { type: string; text?: string })
-      .filter(b => b.type === 'text' && typeof b.text === 'string')
-      .map(b => b.text ?? '')
-      .join('\n')
     if (norm(text)) {
       try {
         const reply: LastReply = { id: stored.uuid ?? e.uuid, text: norm(text) }
