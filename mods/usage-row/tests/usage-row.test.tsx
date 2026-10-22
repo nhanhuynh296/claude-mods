@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import type { Register } from 'claude-code'
 
-import { endedTaskIds, formatCountdown, formatTokens, isLastReply, lastReplyOf, levelColor, ringGlyph, ringSvg, tasksLabel, toAgentTasks, withTask } from '../hooks/register'
+import { endedTaskIds, formatCountdown, formatTokens, isLastReply, lastReplyOf, levelColor, ringGlyph, ringSvg, showsContent, tasksLabel, toAgentTasks, withTask } from '../hooks/register'
 
 test('countdown shows h/m from an hour, mm:ss below', async () => {
   expect(formatCountdown(2 * 3600_000 + 14 * 60_000)).toBe('2h14m')
@@ -225,4 +226,48 @@ test('the band draws an SVG ring on desktop and a glyph ring on the terminal', a
   expect(termTree).toMatch(/[○◔◑◕●]/)
   expect(termTree).not.toContain('"type":"Svg"')
   await term.unmount()
+})
+
+test('a tree shows content when it holds text or a control', async () => {
+  expect(showsContent({ type: 'Box', children: [] })).toBe(false)
+  expect(showsContent({ type: 'Box', children: [{ type: 'Text', children: ['  '] }] })).toBe(false)
+  expect(showsContent({ type: 'Box', children: [{ type: 'Text', children: ['Heads up'] }] })).toBe(true)
+  expect(showsContent({ type: 'Box', children: [{ type: 'Button', props: { label: 'Dismiss' } }] })).toBe(true)
+})
+
+const drawTip: Register = on => {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text>Heads up · a tip</Text>
+        <Button key="dismiss" label="Dismiss" onPress={() => {}} />
+      </Box>
+    )
+  })
+}
+const tipsStandIn = { name: 'tips-stand-in', tier: 'builtin' as const, register: drawTip }
+
+test('a tip beneath and the row draw as two bordered cards', { plugins: [tipsStandIn] }, async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const band = await mountBand($, surface)
+    const drawn = (await band.drawn()) as unknown as { children: { props: Record<string, unknown> }[] }
+    expect(drawn.children).toHaveLength(2)
+    for (const card of drawn.children) expect(card.props).toMatchObject({ borderStyle: 'round', borderDimColor: true, paddingX: 1 })
+    expect(await band.find({ type: 'Text', text: /Heads up/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /5h/ })).toBeDefined()
+    await band.unmount()
+  }
+})
+
+test('with no tip the row draws with no border', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-17T10:00:00Z') })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  const band = await mountBand($, 'terminal')
+  expect(JSON.stringify(await band.drawn())).not.toContain('borderStyle')
+  await band.unmount()
 })

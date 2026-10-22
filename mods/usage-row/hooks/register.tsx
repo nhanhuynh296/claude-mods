@@ -24,6 +24,8 @@ const RING_HEX: Record<Level, string> = { success: '#1F9D55', warning: '#D97706'
 const RING_TRACK = '#80808066'
 
 const RING_PX = 14
+const CARD_BORDER = 'round'
+const CONTENT_TYPES: readonly string[] = ['Button', 'Input', 'Select', 'Svg', 'Image']
 const RING_GLYPHS = ['○', '◔', '◑', '◕', '●'] as const
 
 const usage = atom({ plugin: 'usage-row', key: 'usage' } as const, { tokens: null, window: null, contextPercent: null, fiveHour: null })
@@ -63,6 +65,16 @@ export function tasksLabel(list: readonly Task[]): string {
   const [first, ...rest] = list
   if (!first) return ''
   return rest.length > 0 ? `${first.label} +${rest.length}` : first.label
+}
+
+// Whether a drawn tree shows anything: some text or a control. The band's
+// next(e) is a tree even when nothing beneath draws.
+export function showsContent(node: unknown): boolean {
+  if (typeof node === 'string') return node.trim() !== ''
+  if (!node || typeof node !== 'object') return false
+  const el = node as { type?: string; children?: unknown[] }
+  if (el.type && CONTENT_TYPES.includes(el.type)) return true
+  return (el.children ?? []).some(showsContent)
 }
 
 const sameTasks = (a: readonly Task[], b: readonly Task[]) =>
@@ -279,33 +291,51 @@ export const register: Register = on => {
     const ctxColor = levelColor(ctxPercent) ?? 'success'
     const ctxLabel = ctxPercent === null ? '--' : `${ctxPercent}%`
 
+    const row = (
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row" gap={1}>
+          {Svg ? (
+            <Svg source={ringSvg(ctxPercent, RING_HEX[ctxColor])} alt={`Context ${ctxLabel} used`} width={RING_PX} height={RING_PX} />
+          ) : (
+            <Text color={ctxColor}>{ringGlyph(ctxPercent)}</Text>
+          )}
+          <Text mono tabular wrap="truncate">
+            <Text color={ctxColor} bold>{ctxLabel.padStart(4)}</Text>
+            <Text>{` ${formatTokens(u.tokens)}/${formatTokens(u.window ?? null)}`}</Text>
+            {sep}
+            <Text color={LIMIT_LABEL} bold>5h </Text>
+            <Text color={levelColor(u.fiveHour?.percent ?? null)}>{(u.fiveHour ? `${Math.round(u.fiveHour.percent)}%` : '--').padStart(4)}</Text>
+            {sep}
+            <Text color={RESET} bold>↻ </Text>
+            <Text color={RESET}>{(resetMs === null ? '--' : formatCountdown(resetMs)).padStart(5)}</Text>
+          </Text>
+        </Box>
+        {running.length > 0 && (
+          <Text wrap="truncate">
+            <Text color={TASKS} bold>{`◉ ${running.length} `}</Text>
+            <Text>{tasksLabel(running)}</Text>
+          </Text>
+        )}
+      </Box>
+    )
+
+    // A tip from a plugin beneath (the built-in tips mod) and the row read as
+    // two cards; alone, the row takes no border rows.
+    if (!showsContent(below)) {
+      return (
+        <Box flexDirection="column">
+          {below}
+          {row}
+        </Box>
+      )
+    }
     return (
       <Box flexDirection="column">
-        {below}
-        <Box flexDirection="row" justifyContent="space-between">
-          <Box flexDirection="row" gap={1}>
-            {Svg ? (
-              <Svg source={ringSvg(ctxPercent, RING_HEX[ctxColor])} alt={`Context ${ctxLabel} used`} width={RING_PX} height={RING_PX} />
-            ) : (
-              <Text color={ctxColor}>{ringGlyph(ctxPercent)}</Text>
-            )}
-            <Text mono tabular wrap="truncate">
-              <Text color={ctxColor} bold>{ctxLabel.padStart(4)}</Text>
-              <Text>{` ${formatTokens(u.tokens)}/${formatTokens(u.window ?? null)}`}</Text>
-              {sep}
-              <Text color={LIMIT_LABEL} bold>5h </Text>
-              <Text color={levelColor(u.fiveHour?.percent ?? null)}>{(u.fiveHour ? `${Math.round(u.fiveHour.percent)}%` : '--').padStart(4)}</Text>
-              {sep}
-              <Text color={RESET} bold>↻ </Text>
-              <Text color={RESET}>{(resetMs === null ? '--' : formatCountdown(resetMs)).padStart(5)}</Text>
-            </Text>
-          </Box>
-          {running.length > 0 && (
-            <Text wrap="truncate">
-              <Text color={TASKS} bold>{`◉ ${running.length} `}</Text>
-              <Text>{tasksLabel(running)}</Text>
-            </Text>
-          )}
+        <Box flexDirection="column" borderStyle={CARD_BORDER} borderDimColor paddingX={1}>
+          {below}
+        </Box>
+        <Box flexDirection="column" borderStyle={CARD_BORDER} borderDimColor paddingX={1}>
+          {row}
         </Box>
       </Box>
     )
