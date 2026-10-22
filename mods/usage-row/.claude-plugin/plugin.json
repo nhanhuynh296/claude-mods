@@ -1,6 +1,6 @@
 {
   "name": "usage-row",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "One monospace row above the prompt: a context ring with tokens of the window, 5-hour limit and its reset, running background tasks on the right, plus a prompt-cache countdown under the last reply",
   "types": "./types/index.d.ts"
 }

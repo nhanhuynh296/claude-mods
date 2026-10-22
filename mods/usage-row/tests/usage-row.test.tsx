@@ -145,7 +145,12 @@ test('a background Bash call shows on the right of the row until its notificatio
     await band.unmount()
   }
 
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: notification('b1', 'completed') }] } } as never)
+  await $.session.append({
+    message: { type: 'user', role: 'user', content: [{ type: 'text', text: notification('b1', 'completed') }] },
+    door: 'prompt',
+    origin: { kind: 'task-notification' },
+    uuid: 'n1',
+  } as never)
   const band = await mountBand($, 'terminal')
   expect(await band.find({ type: 'Text', text: /◉/ })).toBeUndefined()
   await band.unmount()

@@ -35,7 +35,8 @@ const agents = atom({ plugin: 'usage-row', key: 'agents' } as const, [])
 
 // A notification's status once its task is over; others (a monitor's event) keep it.
 const TASK_ENDED: readonly string[] = ['completed', 'failed', 'killed', 'stopped']
-const NOTIFIED_TASK = /<task-id>([^<]+)<\/task-id>[\s\S]*?<status>([^<]+)<\/status>/g
+const APPEND_DOORS = ['response', 'prompt', 'delivery', 'queue'] as const
+const NOTIFIED_TASK =/<task-id>([^<]+)<\/task-id>[\s\S]*?<status>([^<]+)<\/status>/g
 
 const clip = (s: string) => (s.length > TASK_LABEL_MAX ? `${s.slice(0, TASK_LABEL_MAX - 1)}…` : s)
 
@@ -238,11 +239,12 @@ export const register: Register = on => {
     return yield* next(e)
   })
 
-  // A task's notification row says it is over: any door, as one queued,
-  // delivered or injected mid-turn comes by a different one; never a reply,
-  // which may quote one. The last reply of
-  // the main thread is where the cache countdown is drawn.
-  on('session.append', async ($, e, next) => {
+  // A task's notification row says it is over: queued, delivered or sent as a
+  // prompt; never a reply, which may quote one. The last reply of the main
+  // thread is where the cache countdown is drawn. Only the doors these come by:
+  // the built-in guard skips installed mods on injected rows (attachment,
+  // hook-context, compaction), and says so on every one.
+  on('session.append', { door: APPEND_DOORS }, async ($, e, next) => {
     const stored = await next(e)
     const text = textOf(e.message.content)
     const ended = e.message.type === 'assistant' ? [] : endedTaskIds(text)
